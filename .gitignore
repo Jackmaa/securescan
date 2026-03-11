@@ -1,0 +1,28 @@
+# Go
+api/tmp/
+api/securescan
+
+# Node / Bun
+web/node_modules/
+web/.svelte-kit/
+web/build/
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Scans (cloned repos + generated reports)
+/scans/
+/reports/
+
+# Docker volumes
+pgdata/
