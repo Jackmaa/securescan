@@ -1,11 +1,17 @@
 package routes
 
 import (
-	"securescan/handlers"
+	"securescan/handlers" // HTTP handler structs for each resource group.
 
-	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3" // Router + grouping primitives.
 )
 
+// Setup registers all HTTP routes for the API.
+//
+// Why this exists as a separate package:
+// - Keeps `main` focused on wiring dependencies and starting the server.
+// - Provides a single place to audit public endpoints (useful for security review).
+// - Makes it straightforward to version routes or attach middleware at group level.
 func Setup(app *fiber.App, ph *handlers.ProjectHandler, sh *handlers.ScanHandler,
 	fh *handlers.FindingHandler, fixH *handlers.FixHandler, sseH *handlers.SSEHandler) {
 

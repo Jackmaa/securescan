@@ -6,6 +6,20 @@
 	import ProgressBar from '$lib/components/ProgressBar.svelte';
 	import type { SSEEvent } from '$lib/types';
 
+	/**
+	 * Scan progress page: shows live progress while the backend runs tools.
+	 *
+	 * Why this page uses both SSE and polling:
+	 * - SSE provides real-time event updates (status/tool_start/tool_complete/etc.).
+	 * - Polling `getScan` on load synchronizes state for refreshes / late joins, and allows
+	 *   the UI to recover if some SSE events were missed during reconnects.
+	 *
+	 * Import rationale:
+	 * - `$app/stores` `page`: provides the `[id]` route param.
+	 * - `goto`: navigation after completion.
+	 * - `connectSSE`: centralized EventSource wiring + JSON parsing.
+	 * - `ProgressBar`: purely presentational progress UI.
+	 */
 	let scanId = $derived($page.params.id);
 	let status = $state('pending');
 	let toolCount = $state(0);
@@ -13,10 +27,17 @@
 	let events = $state<{ type: string; message: string }[]>([]);
 	let sse: ReturnType<typeof connectSSE> | null = null;
 
+	/** Adds a UI-friendly event entry; we store messages rather than raw payloads. */
 	function addEvent(type: string, message: string) {
 		events = [...events, { type, message }];
 	}
 
+	/**
+	 * handleSSEEvent maps backend event frames into UI state updates.
+	 *
+	 * `event.data` is intentionally treated as unknown; we narrow fields per event type.
+	 * This keeps the UI resilient to backend payload changes while still being typed.
+	 */
 	function handleSSEEvent(event: SSEEvent) {
 		const d = event.data as Record<string, unknown>;
 
@@ -52,6 +73,7 @@
 	}
 
 	$effect(() => {
+		// Establish SSE connection for live updates.
 		sse = connectSSE(scanId, handleSSEEvent);
 
 		// Also poll the scan object to sync state on page load
@@ -65,6 +87,7 @@
 			}
 		});
 
+		// Cleanup on unmount/navigation so the connection doesn't leak.
 		return () => sse?.close();
 	});
 </script>

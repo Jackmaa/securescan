@@ -23,7 +23,7 @@ db:
 		-e POSTGRES_PASSWORD=securescan \
 		-e POSTGRES_DB=securescan \
 		-p 5432:5432 \
-		-v $(PWD)/pgdata:/var/lib/postgresql/data \
+		-v $(PWD)/pgdata:/var/lib/postgresql \
 		--rm postgres:18
 
 db-stop:

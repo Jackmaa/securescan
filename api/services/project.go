@@ -1,28 +1,47 @@
 package services
 
 import (
-	"context"
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
+	"context"       // Passed down from handlers; used for git clone cancellation/timeouts.
+	"fmt"           // Wrap errors with context for easier debugging.
+	"os"            // Workspace creation/cleanup and filesystem probes for stack detection.
+	"os/exec"       // Execute external tools (git clone).
+	"path/filepath" // OS-correct workspace and repo path assembly.
+	"strings"       // Simple content/filename heuristics for stack detection.
 
-	"securescan/models"
+	"securescan/models" // Project models and create request payload.
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/google/uuid"          // Project IDs are UUIDs and define workspace directory names.
+	"github.com/jackc/pgx/v5/pgxpool" // PostgreSQL connection pool.
 )
 
+// ProjectService owns project creation and retrieval.
+//
+// Projects are the unit of scanning: a project records where code came from (git/zip),
+// where it is staged locally, and a detected language/framework “stack” used to decide
+// which scanning tools are applicable.
 type ProjectService struct {
 	DB        *pgxpool.Pool
 	Workspace string
 }
 
+// NewProjectService constructs a service with DB and workspace root.
+//
+// Workspace is injected so the server can control where repos are staged (and so
+// tests can use temporary directories).
 func NewProjectService(db *pgxpool.Pool, workspace string) *ProjectService {
 	return &ProjectService{DB: db, Workspace: workspace}
 }
 
+// Create persists a new project and prepares its local workspace.
+//
+// High-level flow:
+// - Create a unique workspace directory (named by UUID).
+// - If source is `git`, clone into that directory.
+// - Detect languages/frameworks to inform scan tool selection.
+// - Insert the project record into the database.
+//
+// Cleanup strategy:
+// - If cloning or DB insert fails, we remove the created workspace to avoid orphaned data.
 func (s *ProjectService) Create(ctx context.Context, req models.CreateProjectRequest) (*models.Project, error) {
 	projectID := uuid.New()
 	localPath := filepath.Join(s.Workspace, projectID.String())
@@ -39,6 +58,14 @@ func (s *ProjectService) Create(ctx context.Context, req models.CreateProjectReq
 	}
 
 	languages, frameworks := detectStack(localPath)
+	// Postgres columns `languages` and `frameworks` are NOT NULL (with defaults).
+	// A nil slice can be encoded as SQL NULL by drivers, so normalize to empty slices.
+	if languages == nil {
+		languages = []string{}
+	}
+	if frameworks == nil {
+		frameworks = []string{}
+	}
 
 	project := &models.Project{
 		ID:         projectID,
@@ -63,6 +90,9 @@ func (s *ProjectService) Create(ctx context.Context, req models.CreateProjectReq
 	return project, nil
 }
 
+// GetByID fetches a project record from the database.
+//
+// The returned LocalPath points to the on-disk workspace created during project creation.
 func (s *ProjectService) GetByID(ctx context.Context, id uuid.UUID) (*models.Project, error) {
 	p := &models.Project{}
 	err := s.DB.QueryRow(ctx, `
@@ -77,6 +107,9 @@ func (s *ProjectService) GetByID(ctx context.Context, id uuid.UUID) (*models.Pro
 }
 
 // cloneRepo does a shallow clone (depth=1) to save time and disk.
+//
+// Shallow clones are usually enough for SAST/secret scans because they analyze the
+// current tree, not history. If future tools need git history, this can be revisited.
 func cloneRepo(ctx context.Context, url, dest string) error {
 	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", url, dest)
 	cmd.Stdout = os.Stdout
@@ -86,22 +119,27 @@ func cloneRepo(ctx context.Context, url, dest string) error {
 
 // detectStack inspects the cloned repo for language/framework indicators.
 // Checks for well-known manifest files and counts file extensions as a fallback.
+//
+// This is intentionally heuristic:
+// - We want a fast “good enough” signal to decide which scanners to run.
+// - We avoid heavyweight parsing of build files (package managers differ widely).
+// If accuracy becomes important, this can be improved by integrating dedicated detectors.
 func detectStack(repoPath string) (languages, frameworks []string) {
 	langSet := map[string]bool{}
 	fwSet := map[string]bool{}
 
 	// Manifest-based detection: each file strongly implies a language + framework
 	manifests := map[string][2]string{
-		"package.json":    {"JavaScript", ""},
-		"tsconfig.json":   {"TypeScript", ""},
-		"go.mod":          {"Go", ""},
+		"package.json":     {"JavaScript", ""},
+		"tsconfig.json":    {"TypeScript", ""},
+		"go.mod":           {"Go", ""},
 		"requirements.txt": {"Python", ""},
-		"Pipfile":         {"Python", ""},
-		"composer.json":   {"PHP", ""},
-		"Gemfile":         {"Ruby", ""},
-		"Cargo.toml":      {"Rust", ""},
-		"pom.xml":         {"Java", "Maven"},
-		"build.gradle":    {"Java", "Gradle"},
+		"Pipfile":          {"Python", ""},
+		"composer.json":    {"PHP", ""},
+		"Gemfile":          {"Ruby", ""},
+		"Cargo.toml":       {"Rust", ""},
+		"pom.xml":          {"Java", "Maven"},
+		"build.gradle":     {"Java", "Gradle"},
 	}
 
 	for file, pair := range manifests {

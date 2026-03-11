@@ -1,15 +1,15 @@
 package services
 
 import (
-	"context"
-	"fmt"
-	"sync"
-	"time"
+	"context" // Used for DB operations and for decoupling async pipeline from HTTP request lifetimes.
+	"fmt"     // Used for assembling small JSON payloads and wrapping status messages.
+	"sync"    // Protects subscriber maps shared across goroutines.
+	"time"    // Timestamping scans and completion.
 
-	"securescan/models"
+	"securescan/models" // Domain models persisted in the database and returned by the API.
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/google/uuid"          // Scans are identified by UUID across APIs and DB.
+	"github.com/jackc/pgx/v5/pgxpool" // PostgreSQL connection pool used for queries/exec.
 )
 
 // SSEEvent represents a Server-Sent Event to push to connected clients.
@@ -28,6 +28,16 @@ type ScanStats struct {
 	Grade         *string        `json:"grade"`
 }
 
+// ScanService owns scan lifecycle and read models (scan status, stats, progress fan-out).
+//
+// This service exists because scans have "workflow" complexity:
+// - creating scan records
+// - running long-lived tool pipelines
+// - tracking progress
+// - aggregating and serving results
+//
+// Keeping this logic here (instead of in handlers) makes it reusable across different
+// transports (HTTP/SSE now; CLI/job runners later).
 type ScanService struct {
 	DB *pgxpool.Pool
 
@@ -37,6 +47,7 @@ type ScanService struct {
 	subscribers map[uuid.UUID][]chan SSEEvent
 }
 
+// NewScanService constructs a ScanService and initializes internal maps.
 func NewScanService(db *pgxpool.Pool) *ScanService {
 	return &ScanService{
 		DB:          db,
@@ -44,6 +55,14 @@ func NewScanService(db *pgxpool.Pool) *ScanService {
 	}
 }
 
+// CreateAndRun creates a scan record and starts the scan pipeline asynchronously.
+//
+// Why we start the pipeline in a goroutine:
+// - The HTTP request that triggered the scan should complete quickly.
+// - Tool execution can outlive the request context and needs independent cancellation semantics.
+//
+// The returned Scan object is the initial persisted state; clients should use SSE or
+// subsequent GET requests to observe progress and completion.
 func (s *ScanService) CreateAndRun(ctx context.Context, project *models.Project) (*models.Scan, error) {
 	scanID := uuid.New()
 	now := time.Now()
@@ -70,6 +89,10 @@ func (s *ScanService) CreateAndRun(ctx context.Context, project *models.Project)
 	return scan, nil
 }
 
+// GetByID fetches a scan record from the database.
+//
+// This is the authoritative source of truth for scan status and final attributes
+// (score/grade/error/timestamps), independent of transient in-memory SSE state.
 func (s *ScanService) GetByID(ctx context.Context, id uuid.UUID) (*models.Scan, error) {
 	scan := &models.Scan{}
 	err := s.DB.QueryRow(ctx, `
@@ -85,6 +108,10 @@ func (s *ScanService) GetByID(ctx context.Context, id uuid.UUID) (*models.Scan, 
 	return scan, nil
 }
 
+// GetStats returns aggregated statistics for a scan’s findings.
+//
+// We do aggregation in SQL to avoid transferring large datasets to Go just to compute
+// counts. GROUPING SETS yields counts for multiple dimensions in one query.
 func (s *ScanService) GetStats(ctx context.Context, scanID uuid.UUID) (*ScanStats, error) {
 	stats := &ScanStats{
 		BySeverity: make(map[string]int),
@@ -136,6 +163,9 @@ func (s *ScanService) GetStats(ctx context.Context, scanID uuid.UUID) (*ScanStat
 }
 
 // Subscribe returns a channel that will receive SSE events for the given scan.
+//
+// The channel is buffered so a brief burst of events does not immediately block
+// the scan pipeline; slow clients will eventually start dropping events (see Broadcast).
 func (s *ScanService) Subscribe(scanID uuid.UUID) chan SSEEvent {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -146,6 +176,8 @@ func (s *ScanService) Subscribe(scanID uuid.UUID) chan SSEEvent {
 }
 
 // Unsubscribe removes a channel from the subscriber list and closes it.
+//
+// We close the channel to signal the writer loop (in the handler) to exit cleanly.
 func (s *ScanService) Unsubscribe(scanID uuid.UUID, ch chan SSEEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -161,6 +193,10 @@ func (s *ScanService) Unsubscribe(scanID uuid.UUID, ch chan SSEEvent) {
 }
 
 // Broadcast sends an SSE event to all subscribers of a scan.
+//
+// We use a non-blocking send to avoid one slow client halting the scan pipeline.
+// The trade-off is that slow clients may miss intermediate updates, but the UI can
+// always recover by fetching the latest scan state via GET endpoints.
 func (s *ScanService) Broadcast(scanID uuid.UUID, event SSEEvent) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -176,6 +212,11 @@ func (s *ScanService) Broadcast(scanID uuid.UUID, event SSEEvent) {
 
 // runPipeline is the main scan orchestration. Runs in its own goroutine.
 // Placeholder — the real implementation comes in Phase 2 with tool adapters.
+//
+// Architectural intent:
+//   - This will iterate over scanner adapters, run applicable tools, persist findings/fixes,
+//     and update scan status/progress counters.
+//   - Progress events are emitted via Broadcast so the frontend can render live updates.
 func (s *ScanService) runPipeline(scan *models.Scan, project *models.Project) {
 	ctx := context.Background()
 
@@ -201,6 +242,9 @@ func (s *ScanService) runPipeline(scan *models.Scan, project *models.Project) {
 	s.mu.Unlock()
 }
 
+// updateStatus persists scan status changes.
+//
+// This helper keeps the pipeline readable and centralizes status persistence.
 func (s *ScanService) updateStatus(ctx context.Context, scanID uuid.UUID, status string) {
 	s.DB.Exec(ctx, `UPDATE scans SET status = $1 WHERE id = $2`, status, scanID)
 }

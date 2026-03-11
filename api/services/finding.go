@@ -1,16 +1,21 @@
 package services
 
 import (
-	"context"
-	"fmt"
-	"strings"
+	"context" // Passed through from handlers for DB operations and cancellation.
+	"fmt"     // Build dynamic SQL and wrap errors with context.
+	"strings" // Assemble SQL fragments safely from known filter/sort options.
 
-	"securescan/models"
+	"securescan/models" // Finding persistence and API response shapes.
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/google/uuid"          // Scan IDs are UUIDs.
+	"github.com/jackc/pgx/v5/pgxpool" // PostgreSQL connection pool.
 )
 
+// FindingFilter captures the server-side query options for listing findings.
+//
+// This structure exists so that:
+// - the handler can convert query params into a typed object, and
+// - the service can build a single SQL query from those options.
 type FindingFilter struct {
 	ScanID   uuid.UUID
 	Severity string
@@ -21,6 +26,7 @@ type FindingFilter struct {
 	Limit    int
 }
 
+// FindingResult is the paginated response returned by List.
 type FindingResult struct {
 	Findings []models.Finding `json:"findings"`
 	Total    int              `json:"total"`
@@ -28,14 +34,27 @@ type FindingResult struct {
 	Limit    int              `json:"limit"`
 }
 
+// FindingService provides read/write operations on findings.
+//
+// Findings are the normalized output of all scanners (Semgrep, TruffleHog, npm audit, etc.).
+// This service focuses on queryability (filtering/sorting/pagination) and efficient inserts.
 type FindingService struct {
 	DB *pgxpool.Pool
 }
 
+// NewFindingService constructs the service.
 func NewFindingService(db *pgxpool.Pool) *FindingService {
 	return &FindingService{DB: db}
 }
 
+// List returns findings for a scan, with optional filters and pagination.
+//
+// Why we build SQL dynamically:
+// - Filters are optional; assembling the WHERE clause avoids complicated “OR param is NULL” patterns.
+// - We still use positional parameters for values, so user input is not interpolated into SQL.
+//
+// Sorting:
+// - Severity sorting uses a CASE expression so the order matches human expectations.
 func (s *FindingService) List(ctx context.Context, f FindingFilter) (*FindingResult, error) {
 	// Build dynamic WHERE clause from filters
 	where := []string{"scan_id = $1"}
@@ -123,6 +142,10 @@ func (s *FindingService) List(ctx context.Context, f FindingFilter) (*FindingRes
 }
 
 // BulkInsert writes all findings from a tool run into the database.
+//
+// Why bulk insert in a transaction:
+// - Tools can output many findings; we want all-or-nothing persistence per tool run.
+// - A transaction reduces overhead and avoids partially persisted results when errors occur.
 func (s *FindingService) BulkInsert(ctx context.Context, findings []models.Finding) error {
 	if len(findings) == 0 {
 		return nil

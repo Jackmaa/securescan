@@ -3,10 +3,18 @@
 	import { getFixes, acceptFix, rejectFix } from '$lib/api';
 	import type { Fix } from '$lib/types';
 
+	/**
+	 * Fix review page: lets the user accept/reject remediation suggestions.
+	 *
+	 * Why fixes are reviewed separately from findings:
+	 * - Fix payloads can include multi-line code snippets and explanations.
+	 * - The workflow is decision-based (accept/reject), so separating keeps the dashboard focused.
+	 */
 	let scanId = $derived($page.params.id);
 	let fixes = $state<Fix[]>([]);
 	let loading = $state(true);
 
+	/** Loads the current list of fixes from the backend for this scan. */
 	async function loadFixes() {
 		loading = true;
 		fixes = await getFixes(scanId);
@@ -14,15 +22,23 @@
 	}
 
 	$effect(() => {
+		// Initial load when the route mounts.
 		loadFixes();
 	});
 
+	/**
+	 * handleAccept updates backend status then reflects it in local UI state.
+	 *
+	 * Note: after mutating a nested object (`fix.status`), we reassign `fixes` to a new array
+	 * to ensure reactive updates propagate.
+	 */
 	async function handleAccept(fix: Fix) {
 		await acceptFix(fix.id);
 		fix.status = 'accepted';
 		fixes = [...fixes];
 	}
 
+	/** Same as accept, but transitions status to rejected. */
 	async function handleReject(fix: Fix) {
 		await rejectFix(fix.id);
 		fix.status = 'rejected';

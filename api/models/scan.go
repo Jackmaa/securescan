@@ -1,11 +1,15 @@
 package models
 
 import (
-	"time"
+	"time" // Scan timing fields are represented as time.Time pointers for optionality.
 
-	"github.com/google/uuid"
+	"github.com/google/uuid" // Scan and project IDs are UUIDs in API and DB.
 )
 
+// Scan represents one execution of the scanning pipeline for a project.
+//
+// Fields like Score/Grade/ErrorMsg are pointers to distinguish "not computed yet"
+// from a legitimate zero value.
 type Scan struct {
 	ID          uuid.UUID  `json:"id"`
 	ProjectID   uuid.UUID  `json:"project_id"`

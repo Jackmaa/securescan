@@ -1,25 +1,41 @@
 package scanner
 
 import (
-	"context"
-	"encoding/json"
-	"os/exec"
-	"slices"
-	"strings"
+	"context"       // Allows cancellation/timeouts for eslint.
+	"encoding/json" // ESLint JSON formatter output is parsed into findings.
+	"os/exec"       // Run eslint as an external process.
+	"slices"        // Convenience helpers for language applicability checks.
+	"strings"       // Heuristics for mapping rule IDs to CWE where possible.
 
-	"securescan/models"
+	"securescan/models" // Normalized Finding model used downstream.
 
-	"github.com/google/uuid"
+	"github.com/google/uuid" // Scan IDs are assigned to each produced Finding.
 )
 
+// ESLintSecurityAdapter integrates ESLint with the `eslint-plugin-security` rules.
+//
+// Why this adapter exists:
+//   - JS/TS projects often already use ESLint, and the security plugin can surface
+//     dangerous patterns quickly (eval, command injection, etc.).
+//   - Output includes file/line/source snippets, which the UI can display directly.
+//
+// We run ESLint with explicit rules and `--no-eslintrc` to ensure results are consistent
+// across repos (not affected by local configs).
 type ESLintSecurityAdapter struct{}
 
+// Name identifies this tool in the database/UI.
 func (e *ESLintSecurityAdapter) Name() string { return "eslint_security" }
 
+// IsApplicable returns true when the project uses JavaScript or TypeScript.
 func (e *ESLintSecurityAdapter) IsApplicable(languages []string) bool {
 	return slices.Contains(languages, "JavaScript") || slices.Contains(languages, "TypeScript")
 }
 
+// Run executes ESLint against the repository and returns JSON output.
+//
+// Important behavior:
+// - ESLint exits non-zero when warnings/errors exist; for scanners, that’s expected.
+// - We capture output regardless of exit code and treat it as scan results.
 func (e *ESLintSecurityAdapter) Run(ctx context.Context, repoPath string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "eslint",
 		"--format", "json",
@@ -41,31 +57,36 @@ type eslintFile struct {
 }
 
 type eslintMessage struct {
-	RuleID   string `json:"ruleId"`
-	Severity int    `json:"severity"` // 1=warn, 2=error
-	Message  string `json:"message"`
-	Line     int    `json:"line"`
-	Column   int    `json:"column"`
-	EndLine  int    `json:"endLine"`
-	EndColumn int   `json:"endColumn"`
-	Source   string `json:"source"`
+	RuleID    string `json:"ruleId"`
+	Severity  int    `json:"severity"` // 1=warn, 2=error
+	Message   string `json:"message"`
+	Line      int    `json:"line"`
+	Column    int    `json:"column"`
+	EndLine   int    `json:"endLine"`
+	EndColumn int    `json:"endColumn"`
+	Source    string `json:"source"`
 }
 
 // eslintOwaspMap connects ESLint security rule names to OWASP categories.
 // This is the heuristic fallback layer for tools without CWE metadata.
 var eslintOwaspMap = map[string]string{
-	"security/detect-eval-with-expression":              "A03",
-	"security/detect-non-literal-fs-filename":           "A01",
-	"security/detect-non-literal-regexp":                "A05",
-	"security/detect-possible-timing-attacks":           "A02",
-	"security/detect-unsafe-regex":                      "A05",
-	"security/detect-buffer-noassert":                   "A05",
-	"security/detect-child-process":                     "A03",
-	"security/detect-no-csrf-before-method-override":    "A01",
-	"security/detect-object-injection":                  "A03",
-	"security/detect-pseudoRandomBytes":                 "A02",
+	"security/detect-eval-with-expression":           "A03",
+	"security/detect-non-literal-fs-filename":        "A01",
+	"security/detect-non-literal-regexp":             "A05",
+	"security/detect-possible-timing-attacks":        "A02",
+	"security/detect-unsafe-regex":                   "A05",
+	"security/detect-buffer-noassert":                "A05",
+	"security/detect-child-process":                  "A03",
+	"security/detect-no-csrf-before-method-override": "A01",
+	"security/detect-object-injection":               "A03",
+	"security/detect-pseudoRandomBytes":              "A02",
 }
 
+// Parse converts ESLint JSON output into normalized findings.
+//
+// This adapter is heuristic by nature:
+// - ESLint rules are not vulnerability IDs, so we map OWASP/CWE as best-effort hints.
+// - We keep the original message/source in RawOutput/CodeSnippet for transparency.
 func (e *ESLintSecurityAdapter) Parse(scanID uuid.UUID, raw []byte) ([]models.Finding, error) {
 	var files []eslintFile
 	if err := json.Unmarshal(raw, &files); err != nil {
@@ -117,6 +138,10 @@ func (e *ESLintSecurityAdapter) Parse(scanID uuid.UUID, raw []byte) ([]models.Fi
 	return findings, nil
 }
 
+// eslintRuleToCWE maps a subset of rule IDs to CWE identifiers.
+//
+// Many ESLint security rules don’t have a 1:1 CWE mapping; this is a best-effort
+// hint for UI/reporting, not a guarantee.
 func eslintRuleToCWE(ruleID string) string {
 	cweMap := map[string]string{
 		"detect-eval-with-expression": "CWE-95",

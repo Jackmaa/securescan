@@ -1,12 +1,22 @@
 package models
 
 import (
-	"encoding/json"
-	"time"
+	"encoding/json" // Raw tool output is stored as JSON for transparency and debugging.
+	"time"          // CreatedAt is stored and returned for ordering/auditing.
 
-	"github.com/google/uuid"
+	"github.com/google/uuid" // Finding IDs and scan linkage use UUIDs.
 )
 
+// Finding is the normalized vulnerability/issue record produced by scanners.
+//
+// Different tools output very different schemas. We normalize into this shape so:
+// - the database schema is stable across tools,
+// - the UI can render a consistent list/detail view, and
+// - reporting/scoring can work across heterogeneous sources.
+//
+// Many fields are optional pointers:
+// - Some tools don’t provide rule IDs, precise locations, or snippets.
+// - Using pointers keeps API responses clean with `omitempty` and preserves “unknown”.
 type Finding struct {
 	ID            uuid.UUID        `json:"id"`
 	ScanID        uuid.UUID        `json:"scan_id"`

@@ -3,6 +3,16 @@
 	import { getScanStats, getFindings } from '$lib/api';
 	import type { ScanStats, FindingResult } from '$lib/types';
 
+	/**
+	 * Scan dashboard page: summary metrics + a filtered findings list.
+	 *
+	 * Why this page fetches two endpoints:
+	 * - `getScanStats` provides a fast, aggregated overview for charts/tiles.
+	 * - `getFindings` provides the actual items for a table view, with server-side filters.
+	 *
+	 * The server performs grouping/filtering so the frontend doesn’t need to download
+	 * the full findings dataset just to compute counts.
+	 */
 	let scanId = $derived($page.params.id);
 	let stats = $state<ScanStats | null>(null);
 	let findings = $state<FindingResult | null>(null);
@@ -11,6 +21,7 @@
 	let owaspFilter = $state('');
 	let toolFilter = $state('');
 
+	// Human-friendly OWASP names for display in the category list.
 	const owaspLabels: Record<string, string> = {
 		A01: 'Broken Access Control',
 		A02: 'Cryptographic Failures',
@@ -24,6 +35,7 @@
 		A10: 'SSRF'
 	};
 
+	// Central place for severity → color mapping so badges/bars stay consistent.
 	const severityColors: Record<string, string> = {
 		critical: 'var(--color-critical)',
 		high: 'var(--color-high)',
@@ -32,6 +44,12 @@
 		info: 'var(--color-info)'
 	};
 
+	/**
+	 * loadData fetches stats + findings for the current filter state.
+	 *
+	 * We build `params` as a plain record so it can be fed directly into URLSearchParams
+	 * in the API client.
+	 */
 	async function loadData() {
 		loading = true;
 		const params: Record<string, string> = {};
@@ -47,17 +65,25 @@
 	}
 
 	$effect(() => {
+		// Initial load when the route mounts.
 		loadData();
 	});
 
 	// Reload when filters change
 	$effect(() => {
+		// Referencing these values establishes reactive dependencies in Svelte 5 runes.
 		void severityFilter;
 		void owaspFilter;
 		void toolFilter;
 		loadData();
 	});
 
+	/**
+	 * gradeColor maps A/B/C/D to theme colors.
+	 *
+	 * This is presentation-focused (not a security model); the score/grade computation
+	 * lives server-side so it can evolve without redeploying the frontend.
+	 */
 	function gradeColor(grade: string | undefined): string {
 		switch (grade) {
 			case 'A': return 'var(--color-success)';

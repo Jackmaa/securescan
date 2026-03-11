@@ -1,4 +1,16 @@
 <script lang="ts">
+	/**
+	 * ProgressBar is a presentational component for scan progress.
+	 *
+	 * Why it’s a separate component:
+	 * - The scan page needs to render progress + a small event timeline.
+	 * - Keeping it isolated makes it easy to restyle without touching scan orchestration logic.
+	 *
+	 * Data contract:
+	 * - `toolsDone/toolCount` come from scan progress (SSE + polling).
+	 * - `status` is the backend scan status string.
+	 * - `events` is a UI-friendly list already reduced to `{ type, message }` for display.
+	 */
 	interface Props {
 		toolsDone: number;
 		toolCount: number;
@@ -8,6 +20,8 @@
 
 	let { toolsDone, toolCount, status, events }: Props = $props();
 
+	// Derived percentage for the progress bar width.
+	// We guard toolCount=0 to avoid NaN when the backend hasn't reported totals yet.
 	let progress = $derived(toolCount > 0 ? (toolsDone / toolCount) * 100 : 0);
 </script>
 

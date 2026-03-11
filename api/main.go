@@ -1,21 +1,27 @@
 package main
 
 import (
-	"flag"
-	"log"
-	"os"
-	"path/filepath"
+	"flag"          // Small CLI surface for operational tasks (e.g., migrations).
+	"log"           // Startup logs are written to stdout/stderr for container friendliness.
+	"os"            // Used for filesystem setup and discovering the executable location.
+	"path/filepath" // OS-correct path assembly for migrations directory.
+	"strings"       // Simple path heuristics for locating migrations in dev vs compiled runs.
 
-	"securescan/config"
-	"securescan/database"
-	"securescan/handlers"
-	"securescan/middleware"
-	"securescan/routes"
-	"securescan/services"
+	"securescan/config"     // Central configuration loading (env + optional .env).
+	"securescan/database"   // PostgreSQL connection + lightweight migration runner.
+	"securescan/handlers"   // HTTP handlers (thin HTTP→service adapters).
+	"securescan/middleware" // Global middleware (recover/logger/CORS).
+	"securescan/routes"     // Route registration and API surface definition.
+	"securescan/services"   // Business logic + persistence boundary.
 
-	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3" // HTTP server framework.
 )
 
+// main is the API server entrypoint.
+//
+// Why this file is mostly "wiring":
+// - The server is composed from small packages (config/database/services/handlers/routes).
+// - Keeping construction here makes dependencies explicit and keeps other packages testable.
 func main() {
 	migrateOnly := flag.Bool("migrate", false, "run migrations and exit")
 	flag.Parse()
@@ -29,8 +35,13 @@ func main() {
 	defer pool.Close()
 	log.Println("connected to PostgreSQL")
 
-	// Migrations live next to the database package
-	migrationsDir := filepath.Join(execDir(), "database", "migrations")
+	// Migrations are stored in `api/database/migrations`.
+	//
+	// When running via `go run`, the compiled binary lives under a Go build cache
+	// directory, so "next to the binary" is *not* the repo checkout. We therefore
+	// resolve migrations from a few known locations (cwd, repo layout) before
+	// falling back to execDir for real deployments.
+	migrationsDir := resolveMigrationsDir()
 	if err := database.Migrate(pool, migrationsDir); err != nil {
 		log.Fatalf("migration failed: %v", err)
 	}
@@ -77,4 +88,32 @@ func execDir() string {
 		return wd
 	}
 	return filepath.Dir(exe)
+}
+
+// resolveMigrationsDir returns the on-disk directory containing SQL migrations.
+//
+// Resolution strategy (first match wins):
+// - `MIGRATIONS_DIR` environment variable (explicit override)
+// - `<cwd>/database/migrations` when starting from `api/`
+// - `<cwd>/api/database/migrations` when starting from repo root
+// - `<execDir>/database/migrations` for compiled deployments where migrations are shipped
+func resolveMigrationsDir() string {
+	if explicit := strings.TrimSpace(os.Getenv("MIGRATIONS_DIR")); explicit != "" {
+		return explicit
+	}
+
+	wd, err := os.Getwd()
+	if err == nil {
+		candidates := []string{
+			filepath.Join(wd, "database", "migrations"),
+			filepath.Join(wd, "api", "database", "migrations"),
+		}
+		for _, dir := range candidates {
+			if _, statErr := os.Stat(dir); statErr == nil {
+				return dir
+			}
+		}
+	}
+
+	return filepath.Join(execDir(), "database", "migrations")
 }

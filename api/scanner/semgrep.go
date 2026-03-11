@@ -1,22 +1,34 @@
 package scanner
 
 import (
-	"context"
-	"encoding/json"
-	"os/exec"
+	"context"       // Enables cancellation/timeouts for the semgrep process.
+	"encoding/json" // Semgrep emits JSON; we unmarshal only the fields we use.
+	"os/exec"       // Run the semgrep CLI as an external process.
 
-	"securescan/models"
+	"securescan/models" // Normalized Finding model for downstream storage/UI.
 
-	"github.com/google/uuid"
+	"github.com/google/uuid" // Scan IDs are attached to every produced Finding.
 )
 
+// SemgrepAdapter integrates the Semgrep CLI.
+//
+// Semgrep is used as a broad “SAST baseline” because it supports many languages and
+// has high-quality community rulepacks. We intentionally run a known ruleset rather
+// than relying on project-local configs so results are consistent across repos.
 type SemgrepAdapter struct{}
 
+// Name identifies this tool in the database and UI.
 func (s *SemgrepAdapter) Name() string { return "semgrep" }
 
 // Semgrep supports most languages out of the box, so it's always applicable
 func (s *SemgrepAdapter) IsApplicable(_ []string) bool { return true }
 
+// Run executes Semgrep against the repository directory and returns raw JSON output.
+//
+// Notes on flags:
+// - `--config p/owasp-top-ten`: uses a curated, security-focused ruleset.
+// - `--json`: machine-readable output for parsing into normalized findings.
+// - `--quiet`: reduces noise so stderr is mostly reserved for real failures.
 func (s *SemgrepAdapter) Run(ctx context.Context, repoPath string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "semgrep",
 		"--config", "p/owasp-top-ten",
@@ -62,6 +74,7 @@ func (s *SemgrepAdapter) Parse(scanID uuid.UUID, raw []byte) ([]models.Finding, 
 		return nil, err
 	}
 
+	// We preallocate based on semgrep’s result count to reduce allocations for large scans.
 	findings := make([]models.Finding, 0, len(output.Results))
 	for _, r := range output.Results {
 		severity := normalizeSeverity(r.Extra.Severity)
@@ -97,6 +110,9 @@ func (s *SemgrepAdapter) Parse(scanID uuid.UUID, raw []byte) ([]models.Finding, 
 	return findings, nil
 }
 
+// normalizeSeverity converts Semgrep’s severity labels into our normalized scale.
+//
+// We normalize early so sorting, scoring, and UI treatment are consistent across tools.
 func normalizeSeverity(s string) string {
 	switch s {
 	case "ERROR":
@@ -118,6 +134,10 @@ func extractOwaspCategory(s string) string {
 	return s
 }
 
+// strPtr stores empty strings as NULLs in the database by returning nil when empty.
+//
+// This helps keep the schema semantically clean (unknown vs empty) and avoids noise
+// in API responses that use `omitempty`.
 func strPtr(s string) *string {
 	if s == "" {
 		return nil
@@ -125,6 +145,7 @@ func strPtr(s string) *string {
 	return &s
 }
 
+// intPtr stores 0 as NULL by returning nil when i==0, matching “unknown” semantics.
 func intPtr(i int) *int {
 	if i == 0 {
 		return nil
@@ -132,6 +153,11 @@ func intPtr(i int) *int {
 	return &i
 }
 
+// mustMarshal is a convenience helper to keep raw tool output embedded in findings.
+//
+// We intentionally ignore marshal errors here because v is derived from already
+// unmarshaled JSON structs; if marshal fails, we prefer returning a best-effort
+// empty/partial raw payload rather than failing the entire scan.
 func mustMarshal(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b

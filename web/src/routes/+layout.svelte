@@ -4,6 +4,14 @@
 	let { children } = $props();
 </script>
 
+<!--
+  Root layout for the app.
+
+  Why we import `app.css` here:
+  - SvelteKit layouts apply to all nested routes, so global styles/variables only need to be loaded once.
+  - It keeps individual pages/components focused on structure, not global theming.
+-->
+
 <div class="min-h-screen">
 	<nav class="border-b border-[var(--color-border)] px-6 py-4">
 		<div class="mx-auto flex max-w-7xl items-center justify-between">

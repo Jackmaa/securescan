@@ -1,4 +1,11 @@
 <script lang="ts">
+	/**
+	 * RepoInput collects a Git URL and emits a submit event to the parent.
+	 *
+	 * Why it delegates submission to the parent:
+	 * - The parent route owns API calls, navigation, and error handling.
+	 * - This component stays purely UI + input validation, which improves reuse and testability.
+	 */
 	interface Props {
 		onsubmit: (name: string, url: string) => void;
 		loading: boolean;
@@ -9,6 +16,13 @@
 	let url = $state('');
 	let name = $derived(extractRepoName(url));
 
+	/**
+	 * extractRepoName infers a reasonable default project name from the URL.
+	 *
+	 * Why we do this:
+	 * - Most users paste `https://github.com/org/repo` and expect a good default name.
+	 * - We avoid a second input field until it becomes necessary.
+	 */
 	function extractRepoName(repoUrl: string): string {
 		try {
 			const parts = repoUrl.replace(/\.git$/, '').split('/');
@@ -18,6 +32,12 @@
 		}
 	}
 
+	/**
+	 * handleSubmit prevents the browser form submission and calls the provided callback.
+	 *
+	 * Minimal validation lives here (non-empty URL + derived name) so we can keep the
+	 * button/inputs responsive; deeper validation happens on the backend.
+	 */
 	function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
 		if (!url.trim() || !name) return;

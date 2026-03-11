@@ -3,9 +3,30 @@
 	import { createProject, triggerScan } from '$lib/api';
 	import RepoInput from '$lib/components/RepoInput.svelte';
 
+	/**
+	 * Home page: accepts a repository URL and starts a scan.
+	 *
+	 * Import rationale:
+	 * - `goto`: programmatic navigation after the scan is created.
+	 * - `createProject/triggerScan`: backend calls are centralized in `$lib/api`.
+	 * - `RepoInput`: isolates the form UI from orchestration and error handling.
+	 */
+
 	let loading = $state(false);
 	let error = $state('');
 
+	/**
+	 * handleSubmit is called by RepoInput when the user submits a repo URL.
+	 *
+	 * Flow:
+	 * - Create project (stages repo server-side).
+	 * - Trigger scan (starts async pipeline).
+	 * - Navigate to the scan progress page.
+	 *
+	 * Why we keep it sequential:
+	 * - Triggering a scan requires a project ID.
+	 * - If creation fails, we can show a precise error without starting a scan.
+	 */
 	async function handleSubmit(name: string, url: string) {
 		loading = true;
 		error = '';

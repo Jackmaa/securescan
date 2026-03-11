@@ -1,19 +1,22 @@
 package database
 
 import (
-	"context"
-	"fmt"
-	"log"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
+	"context"       // Used for connection setup, pings, and migration execution.
+	"fmt"           // Wrap errors with context so callers get actionable messages.
+	"log"           // Migration progress is logged for operational visibility.
+	"os"            // Read migration files from disk at startup.
+	"path/filepath" // Build OS-correct paths to migration directories/files.
+	"sort"          // Ensure deterministic migration ordering.
+	"strings"       // Filter filenames by extension.
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgxpool" // PostgreSQL driver + connection pooling.
 )
 
 // Connect creates a connection pool to PostgreSQL.
-// The pool manages multiple connections and handles reconnection automatically.
+//
+// Why a pool:
+// - The API serves concurrent requests; a single connection would serialize queries.
+// - The driver manages connection reuse and health checks efficiently.
 func Connect(dsn string) (*pgxpool.Pool, error) {
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -36,6 +39,14 @@ func Connect(dsn string) (*pgxpool.Pool, error) {
 // Migrate runs all SQL files in the migrations directory in lexicographic order.
 // Each migration is idempotent (uses IF NOT EXISTS, etc.) so running them
 // multiple times is safe. No migration tracking table — keep it simple.
+//
+// This is intentionally lightweight:
+//   - For early-stage projects, a minimal “run every .sql file” approach reduces
+//     operational overhead.
+//   - Idempotent migrations avoid the complexity of version tables while remaining safe.
+//
+// If/when migrations become non-idempotent, this should evolve into a tracked system
+// (e.g., goose, golang-migrate, or a custom schema_migrations table).
 func Migrate(pool *pgxpool.Pool, migrationsDir string) error {
 	entries, err := os.ReadDir(migrationsDir)
 	if err != nil {
