@@ -39,7 +39,8 @@ type ScanStats struct {
 // Keeping this logic here (instead of in handlers) makes it reusable across different
 // transports (HTTP/SSE now; CLI/job runners later).
 type ScanService struct {
-	DB *pgxpool.Pool
+	DB         *pgxpool.Pool
+	FindingSvc *FindingService
 
 	// SSE subscriber management: each scan ID maps to a set of channels.
 	// Multiple browser tabs can subscribe to the same scan.
@@ -48,9 +49,10 @@ type ScanService struct {
 }
 
 // NewScanService constructs a ScanService and initializes internal maps.
-func NewScanService(db *pgxpool.Pool) *ScanService {
+func NewScanService(db *pgxpool.Pool, findingSvc *FindingService) *ScanService {
 	return &ScanService{
 		DB:          db,
+		FindingSvc:  findingSvc,
 		subscribers: make(map[uuid.UUID][]chan SSEEvent),
 	}
 }
@@ -210,36 +212,10 @@ func (s *ScanService) Broadcast(scanID uuid.UUID, event SSEEvent) {
 	}
 }
 
-// runPipeline is the main scan orchestration. Runs in its own goroutine.
-// Placeholder — the real implementation comes in Phase 2 with tool adapters.
-//
-// Architectural intent:
-//   - This will iterate over scanner adapters, run applicable tools, persist findings/fixes,
-//     and update scan status/progress counters.
-//   - Progress events are emitted via Broadcast so the frontend can render live updates.
+// runPipeline delegates to the full scan orchestrator in scanner.go.
+// Runs in its own goroutine, decoupled from the HTTP request lifecycle.
 func (s *ScanService) runPipeline(scan *models.Scan, project *models.Project) {
-	ctx := context.Background()
-
-	s.updateStatus(ctx, scan.ID, "scanning")
-	s.Broadcast(scan.ID, SSEEvent{Type: "status", Data: `{"status":"scanning","message":"Scan started..."}`})
-
-	// TODO: Phase 2 — tool adapter orchestration goes here
-
-	now := time.Now()
-	s.DB.Exec(ctx, `
-		UPDATE scans SET status = 'completed', completed_at = $1
-		WHERE id = $2
-	`, now, scan.ID)
-
-	s.Broadcast(scan.ID, SSEEvent{Type: "complete", Data: fmt.Sprintf(`{"scan_id":"%s"}`, scan.ID)})
-
-	// Close all subscriber channels after a brief delay so the complete event gets delivered
-	s.mu.Lock()
-	for _, ch := range s.subscribers[scan.ID] {
-		close(ch)
-	}
-	delete(s.subscribers, scan.ID)
-	s.mu.Unlock()
+	RunScanPipeline(context.Background(), s, s.FindingSvc, scan, project)
 }
 
 // updateStatus persists scan status changes.

@@ -55,8 +55,8 @@ func main() {
 
 	// Services
 	projectSvc := services.NewProjectService(pool, cfg.ScanWorkspace)
-	scanSvc := services.NewScanService(pool)
 	findingSvc := services.NewFindingService(pool)
+	scanSvc := services.NewScanService(pool, findingSvc)
 	fixSvc := services.NewFixService(pool)
 
 	// Handlers
