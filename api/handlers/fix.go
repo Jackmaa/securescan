@@ -14,12 +14,14 @@ import (
 // supports per-fix accept/reject decisions as well as a bulk endpoint so the UI can
 // apply actions efficiently.
 type FixHandler struct {
-	Service *services.FixService
+	Service    *services.FixService
+	FindingSvc *services.FindingService
+	AIFixer    *services.AIFixGenerator
 }
 
-// NewFixHandler constructs a handler with its service dependency injected.
-func NewFixHandler(s *services.FixService) *FixHandler {
-	return &FixHandler{Service: s}
+// NewFixHandler constructs a handler with its dependencies injected.
+func NewFixHandler(s *services.FixService, findingSvc *services.FindingService, aiFixer *services.AIFixGenerator) *FixHandler {
+	return &FixHandler{Service: s, FindingSvc: findingSvc, AIFixer: aiFixer}
 }
 
 // GetFixes lists all fixes associated with a scan.
@@ -93,4 +95,80 @@ func (h *FixHandler) Bulk(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"updated": len(req.FixIDs)})
+}
+
+// AIFix generates an AI-powered fix for a specific finding.
+// Invoked on-demand via the "Get AI Fix" button to control API costs.
+func (h *FixHandler) AIFix(c fiber.Ctx) error {
+	scanID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid scan ID"})
+	}
+
+	findingID, err := uuid.Parse(c.Params("findingId"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid finding ID"})
+	}
+
+	if h.AIFixer == nil || !h.AIFixer.CanFix(models.Finding{}) {
+		return c.Status(501).JSON(fiber.Map{"error": "AI fixes not configured (ANTHROPIC_API_KEY missing)"})
+	}
+
+	// Fetch the finding
+	result, err := h.FindingSvc.List(c.Context(), services.FindingFilter{
+		ScanID: scanID,
+		Page:   1,
+		Limit:  1,
+	})
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// Find the specific finding
+	var finding *models.Finding
+	for _, f := range result.Findings {
+		if f.ID == findingID {
+			finding = &f
+			break
+		}
+	}
+
+	// If not found in first page, query more broadly
+	if finding == nil {
+		allResult, err := h.FindingSvc.List(c.Context(), services.FindingFilter{
+			ScanID: scanID,
+			Page:   1,
+			Limit:  1000,
+		})
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+		for _, f := range allResult.Findings {
+			if f.ID == findingID {
+				finding = &f
+				break
+			}
+		}
+	}
+
+	if finding == nil {
+		return c.Status(404).JSON(fiber.Map{"error": "finding not found"})
+	}
+
+	sourceCode := ""
+	if finding.CodeSnippet != nil {
+		sourceCode = *finding.CodeSnippet
+	}
+
+	fix, err := h.AIFixer.Generate(c.Context(), *finding, sourceCode)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	fix.ScanID = scanID
+	if err := h.Service.Insert(c.Context(), fix); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.Status(201).JSON(fix)
 }

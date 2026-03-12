@@ -59,11 +59,14 @@ func main() {
 	fixSvc := services.NewFixService(pool)
 	scanSvc := services.NewScanService(pool, findingSvc, fixSvc)
 
+	// AI fix generator (optional — only active when ANTHROPIC_API_KEY is set)
+	aiFixer := services.NewAIFixGenerator(cfg)
+
 	// Handlers
 	projectH := handlers.NewProjectHandler(projectSvc)
 	scanH := handlers.NewScanHandler(scanSvc, projectSvc)
 	findingH := handlers.NewFindingHandler(findingSvc)
-	fixH := handlers.NewFixHandler(fixSvc)
+	fixH := handlers.NewFixHandler(fixSvc, findingSvc, aiFixer)
 	sseH := handlers.NewSSEHandler(scanSvc)
 
 	// Fiber app

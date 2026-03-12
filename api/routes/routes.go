@@ -35,4 +35,7 @@ func Setup(app *fiber.App, ph *handlers.ProjectHandler, sh *handlers.ScanHandler
 	api.Post("/fixes/:id/accept", fixH.Accept)
 	api.Post("/fixes/:id/reject", fixH.Reject)
 	api.Post("/fixes/bulk", fixH.Bulk)
+
+	// AI Fix (on-demand per finding)
+	api.Post("/scans/:id/ai-fix/:findingId", fixH.AIFix)
 }
