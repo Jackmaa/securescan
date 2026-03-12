@@ -59,6 +59,10 @@ func main() {
 	fixSvc := services.NewFixService(pool)
 	scanSvc := services.NewScanService(pool, findingSvc, fixSvc)
 
+	gitSvc := services.NewGitIntegrationService(fixSvc, cfg)
+	reportDir := filepath.Join(cfg.ScanWorkspace, "reports")
+	reportSvc := services.NewReportService(pool, scanSvc, findingSvc, fixSvc, reportDir)
+
 	// AI fix generator (optional — only active when ANTHROPIC_API_KEY is set)
 	aiFixer := services.NewAIFixGenerator(cfg)
 
@@ -68,6 +72,8 @@ func main() {
 	findingH := handlers.NewFindingHandler(findingSvc)
 	fixH := handlers.NewFixHandler(fixSvc, findingSvc, aiFixer)
 	sseH := handlers.NewSSEHandler(scanSvc)
+	gitH := handlers.NewGitHandler(gitSvc, scanSvc, projectSvc)
+	reportH := handlers.NewReportHandler(reportSvc, scanSvc, projectSvc)
 
 	// Fiber app
 	app := fiber.New(fiber.Config{
@@ -75,7 +81,7 @@ func main() {
 	})
 
 	middleware.Setup(app, cfg.FrontendURL)
-	routes.Setup(app, projectH, scanH, findingH, fixH, sseH)
+	routes.Setup(app, projectH, scanH, findingH, fixH, sseH, gitH, reportH)
 
 	log.Printf("SecureScan API listening on :%s", cfg.APIPort)
 	log.Fatal(app.Listen(":" + cfg.APIPort))

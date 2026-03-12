@@ -13,7 +13,8 @@ import (
 // - Provides a single place to audit public endpoints (useful for security review).
 // - Makes it straightforward to version routes or attach middleware at group level.
 func Setup(app *fiber.App, ph *handlers.ProjectHandler, sh *handlers.ScanHandler,
-	fh *handlers.FindingHandler, fixH *handlers.FixHandler, sseH *handlers.SSEHandler) {
+	fh *handlers.FindingHandler, fixH *handlers.FixHandler, sseH *handlers.SSEHandler,
+	gitH *handlers.GitHandler, reportH *handlers.ReportHandler) {
 
 	api := app.Group("/api")
 
@@ -38,4 +39,11 @@ func Setup(app *fiber.App, ph *handlers.ProjectHandler, sh *handlers.ScanHandler
 
 	// AI Fix (on-demand per finding)
 	api.Post("/scans/:id/ai-fix/:findingId", fixH.AIFix)
+
+	// Git integration
+	api.Post("/scans/:id/apply-fixes", gitH.ApplyFixes)
+
+	// Reports
+	api.Post("/scans/:id/report", reportH.Generate)
+	api.Get("/scans/:id/report/download", reportH.Download)
 }
