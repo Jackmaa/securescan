@@ -58,10 +58,14 @@ func (s *GitIntegrationService) ApplyFixes(ctx context.Context, scanID uuid.UUID
 		return "", fmt.Errorf("no accepted fixes to apply")
 	}
 
-	// Create branch
-	branchName := fmt.Sprintf("fix/securescan-%s", time.Now().Format("2006-01-02"))
+	// Create branch — append a counter if the name already exists (e.g., second run same day).
+	base := fmt.Sprintf("fix/securescan-%s", time.Now().Format("2006-01-02"))
+	branchName := base
+	for i := 2; gitBranchExists(ctx, repoPath, branchName); i++ {
+		branchName = fmt.Sprintf("%s-%d", base, i)
+	}
 	if err := gitCmd(ctx, repoPath, "checkout", "-b", branchName); err != nil {
-		return "", fmt.Errorf("create branch: %w", err)
+		return "", fmt.Errorf("create branch %q in %s: %w", branchName, repoPath, err)
 	}
 
 	// Sort fixes by file, then by line number DESCENDING so earlier fixes don't
@@ -151,10 +155,19 @@ func (s *GitIntegrationService) ApplyFixes(ctx context.Context, scanID uuid.UUID
 	return branchName, nil
 }
 
+// gitBranchExists checks whether a local branch name already exists.
+func gitBranchExists(ctx context.Context, dir, branch string) bool {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "refs/heads/"+branch)
+	cmd.Dir = dir
+	return cmd.Run() == nil
+}
+
 func gitCmd(ctx context.Context, dir string, args ...string) error {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }

@@ -16,6 +16,11 @@ import (
 type XSSFixer struct{}
 
 func (f *XSSFixer) CanFix(finding models.Finding) bool {
+	// Dependency-level vulnerabilities are handled by VulnerableDepFixer.
+	// This generator only targets source-code findings from SAST tools.
+	if finding.ToolName == "npm_audit" {
+		return false
+	}
 	if finding.CweID != nil && *finding.CweID == "CWE-79" {
 		return true
 	}

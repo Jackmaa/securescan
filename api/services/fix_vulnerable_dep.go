@@ -33,33 +33,29 @@ func (f *VulnerableDepFixer) CanFix(finding models.Finding) bool {
 }
 
 func (f *VulnerableDepFixer) Generate(_ context.Context, finding models.Finding, _ string) (*models.Fix, error) {
-	explanation := "This dependency has a known vulnerability with a fix available. " +
-		"Update to the patched version to resolve the security issue. " +
-		"Run `npm audit fix` to attempt automatic updates, or manually update the version in package.json."
+	explanation := "One or more dependencies have known vulnerabilities with fixes available. " +
+		"Run `npm audit fix` to attempt automatic updates, or `npm audit fix --force` " +
+		"if breaking changes are acceptable."
 
-	// Extract package name from message ("packageName: advisory title")
+	// The fixed_code is intentionally identical for ALL npm audit findings so the
+	// deduplication in GenerateFixes() collapses them into a single fix record.
+	// The per-package details are visible in the findings table.
+	fixedCode := "npm audit fix --force"
+
+	// Extract package name for the description (used in the merged "(N findings)" label)
 	pkgName := finding.Message
 	if idx := strings.Index(pkgName, ":"); idx > 0 {
 		pkgName = pkgName[:idx]
 	}
 
-	fixedCode := "# Option 1: Automatic fix\n" +
-		"npm audit fix\n\n" +
-		"# Option 2: Force update (may include breaking changes)\n" +
-		"npm audit fix --force\n\n" +
-		"# Option 3: Manual update in package.json\n" +
-		"# Update \"" + pkgName + "\" to the latest patched version"
-
-	filePath := "package.json"
-
 	fix := &models.Fix{
 		ID:          uuid.New(),
 		FindingID:   finding.ID,
 		FixType:     "template",
-		Description: "Update " + pkgName + " to patched version",
+		Description: "Update vulnerable dependencies",
 		Explanation: &explanation,
 		FixedCode:   &fixedCode,
-		FilePath:    filePath,
+		FilePath:    "package.json",
 		Status:      "pending",
 	}
 	return fix, nil

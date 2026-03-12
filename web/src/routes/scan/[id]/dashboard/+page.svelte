@@ -41,7 +41,7 @@ $<script lang="ts">
 		high: 'var(--color-high)',
 		medium: 'var(--color-medium)',
 		low: 'var(--color-low)',
-		info: 'var(--color-info)'
+		info: 'var(--color-info)'		
 	};
 
 	/**
@@ -217,7 +217,7 @@ $<script lang="ts">
 				</div>
 			</div>
 
-			{#if findings?.findings?.length}
+			{#if findings && findings.findings && findings.findings.length > 0}
 				<div class="divide-y divide-[var(--color-border)]">
 					{#each findings.findings as finding}
 						<div class="px-6 py-3 text-sm">

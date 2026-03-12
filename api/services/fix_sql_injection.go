@@ -17,6 +17,11 @@ import (
 type SQLInjectionFixer struct{}
 
 func (f *SQLInjectionFixer) CanFix(finding models.Finding) bool {
+	// Dependency-level vulnerabilities are handled by VulnerableDepFixer.
+	// This generator only targets source-code findings from SAST tools.
+	if finding.ToolName == "npm_audit" {
+		return false
+	}
 	if finding.CweID != nil && *finding.CweID == "CWE-89" {
 		return true
 	}
