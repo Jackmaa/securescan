@@ -1,12 +1,19 @@
-.PHONY: dev api web db db-stop migrate test-scan clean
+.PHONY: dev api web db db-wait db-stop migrate test-scan clean
 
 # Run everything
 dev:
 	@echo "Starting PostgreSQL, API, and frontend..."
 	@make db &
+	@make db-wait
 	@make api &
 	@make web
 	@wait
+
+# Wait for PostgreSQL to accept connections before starting the API
+db-wait:
+	@echo "Waiting for PostgreSQL..."
+	@until docker exec securescan-pg pg_isready -U securescan -q 2>/dev/null; do sleep 0.3; done
+	@echo "PostgreSQL ready."
 
 # Go API with hot reload
 api:

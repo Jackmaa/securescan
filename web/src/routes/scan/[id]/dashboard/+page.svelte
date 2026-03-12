@@ -217,7 +217,7 @@ $<script lang="ts">
 				</div>
 			</div>
 
-			{#if findings && findings.findings.length > 0}
+			{#if findings?.findings?.length}
 				<div class="divide-y divide-[var(--color-border)]">
 					{#each findings.findings as finding}
 						<div class="px-6 py-3 text-sm">
