@@ -1,33 +1,20 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { generateReport as apiGenerateReport } from '$lib/api';
 
-	/**
-	 * Report page: triggers report generation and provides a download link.
-	 *
-	 * This is currently a UI placeholder for a backend feature:
-	 * - POST `/api/scans/:id/report` to generate an artifact
-	 * - GET `/api/scans/:id/report/download` to retrieve it
-	 *
-	 * Keeping it as a separate route allows the workflow to evolve (format selection,
-	 * report history, permissions) without complicating the dashboard.
-	 */
 	let scanId = $derived($page.params.id);
 	let generating = $state(false);
 	let downloadUrl = $state('');
+	let error = $state('');
 
-	/**
-	 * generateReport asks the API to build a report asynchronously.
-	 *
-	 * The UI only sets a download URL when generation succeeds. Error presentation
-	 * can be enhanced later once the backend defines a stable error payload for reports.
-	 */
 	async function generateReport() {
 		generating = true;
+		error = '';
 		try {
-			const res = await fetch(`/api/scans/${scanId}/report`, { method: 'POST' });
-			if (res.ok) {
-				downloadUrl = `/api/scans/${scanId}/report/download`;
-			}
+			await apiGenerateReport(scanId);
+			downloadUrl = `/api/scans/${scanId}/report/download`;
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to generate report';
 		} finally {
 			generating = false;
 		}

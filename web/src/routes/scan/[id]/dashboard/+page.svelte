@@ -1,4 +1,4 @@
-<script lang="ts">
+$<script lang="ts">
 	import { page } from '$app/stores';
 	import { getScanStats, getFindings } from '$lib/api';
 	import type { ScanStats, FindingResult } from '$lib/types';

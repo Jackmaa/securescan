@@ -100,3 +100,19 @@ export function bulkFixAction(fixIds: string[], action: 'accept' | 'reject') {
 		body: JSON.stringify({ fix_ids: fixIds, action })
 	});
 }
+
+export function requestAIFix(scanId: string, findingId: string) {
+	return request<Fix>(`/scans/${scanId}/ai-fix/${findingId}`, { method: 'POST' });
+}
+
+export function applyFixes(scanId: string) {
+	return request<{ branch: string; message: string }>(`/scans/${scanId}/apply-fixes`, {
+		method: 'POST'
+	});
+}
+
+export function generateReport(scanId: string) {
+	return request<{ id: string; file_path: string }>(`/scans/${scanId}/report`, {
+		method: 'POST'
+	});
+}
