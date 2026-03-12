@@ -41,6 +41,7 @@ type ScanStats struct {
 type ScanService struct {
 	DB         *pgxpool.Pool
 	FindingSvc *FindingService
+	FixSvc     *FixService
 
 	// SSE subscriber management: each scan ID maps to a set of channels.
 	// Multiple browser tabs can subscribe to the same scan.
@@ -49,10 +50,11 @@ type ScanService struct {
 }
 
 // NewScanService constructs a ScanService and initializes internal maps.
-func NewScanService(db *pgxpool.Pool, findingSvc *FindingService) *ScanService {
+func NewScanService(db *pgxpool.Pool, findingSvc *FindingService, fixSvc *FixService) *ScanService {
 	return &ScanService{
 		DB:          db,
 		FindingSvc:  findingSvc,
+		FixSvc:      fixSvc,
 		subscribers: make(map[uuid.UUID][]chan SSEEvent),
 	}
 }
@@ -215,7 +217,7 @@ func (s *ScanService) Broadcast(scanID uuid.UUID, event SSEEvent) {
 // runPipeline delegates to the full scan orchestrator in scanner.go.
 // Runs in its own goroutine, decoupled from the HTTP request lifecycle.
 func (s *ScanService) runPipeline(scan *models.Scan, project *models.Project) {
-	RunScanPipeline(context.Background(), s, s.FindingSvc, scan, project)
+	RunScanPipeline(context.Background(), s, s.FindingSvc, s.FixSvc, scan, project)
 }
 
 // updateStatus persists scan status changes.

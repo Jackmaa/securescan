@@ -34,7 +34,7 @@ type ToolResult struct {
 //
 // SSE events are broadcast at each stage so the frontend can render live progress.
 func RunScanPipeline(ctx context.Context, scanSvc *ScanService, findingSvc *FindingService,
-	scan *models.Scan, project *models.Project) {
+	fixSvc *FixService, scan *models.Scan, project *models.Project) {
 
 	scanID := scan.ID
 	repoPath := project.LocalPath
@@ -138,11 +138,16 @@ func RunScanPipeline(ctx context.Context, scanSvc *ScanService, findingSvc *Find
 	})
 	score, grade := ComputeScore(allFindings)
 
-	// --- Stage 6: Persist ---
+	// --- Stage 6: Persist findings ---
 	if len(allFindings) > 0 {
 		if err := findingSvc.BulkInsert(ctx, allFindings); err != nil {
 			log.Printf("bulk insert findings failed: %v", err)
 		}
+	}
+
+	// --- Stage 7: Generate template fixes ---
+	if len(allFindings) > 0 {
+		GenerateFixes(ctx, fixSvc, allFindings, scanID, project.LocalPath)
 	}
 
 	now := time.Now()
